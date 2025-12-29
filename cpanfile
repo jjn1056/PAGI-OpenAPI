@@ -22,6 +22,7 @@ requires 'JSON::MaybeXS', '1.004003';
 # Utilities
 requires 'Module::Load', '0.36';
 requires 'Scalar::Util', '1.63';
+requires 'Path::Tiny', '0.144';
 
 # Testing
 on 'test' => sub {

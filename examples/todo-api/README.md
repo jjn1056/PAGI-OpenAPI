@@ -11,13 +11,20 @@ A simple CRUD todo list API demonstrating PAGI::OpenAPI basics.
 - **Error shortcuts** - `$c->not_found()`, `$c->bad_request()`
 - **Response chaining** - `$c->status(201)->json($data)`
 - **In-memory storage** - Simple Store class for data
-- **Helper access** - `$c->todos` for store access
+- **Service access** - `$c->todos` for store access via services
+- **home() auto-detection** - Schema resolved relative to app home
+- **run_if_script** - Module is directly runnable without app.pl wrapper
 
 ## Running
 
 ```bash
 cd examples/todo-api
-pagi-server --app app.pl --port 5000
+
+# Run the module directly via pagi-server
+pagi-server -Ilib -I../../lib ./lib/TodoAPI.pm --port 5000
+
+# Or use the app.pl wrapper
+pagi-server -Ilib -I../../lib --app app.pl --port 5000
 ```
 
 Visit http://localhost:5000/docs for Swagger UI.
@@ -57,20 +64,18 @@ curl -X POST http://localhost:5000/todos/1/complete
 curl -X DELETE http://localhost:5000/todos/1
 ```
 
-## Code Structure
+## Directory Structure
 
 ```
-app.pl
-├── TodoAPI (main app)
-│   ├── openapi_schema() → schema.yaml
-│   ├── build_helpers() → { todos => $store }
-│   └── on_startup() → initialize store
-├── TodoAPI::Store (in-memory storage)
-└── TodoAPI::Handlers::Todos
-    ├── list() - GET /todos
-    ├── get() - GET /todos/{id}
-    ├── create() - POST /todos
-    ├── update() - PUT /todos/{id}
-    ├── delete() - DELETE /todos/{id}
-    └── complete() - POST /todos/{id}/complete
+todo-api/
+├── app.pl                          # Entry point wrapper
+├── schema.yaml                     # OpenAPI schema
+├── public/
+│   └── index.html                  # Web frontend
+└── lib/
+    └── TodoAPI.pm                  # Main app class
+    └── TodoAPI/
+        ├── Store.pm                # In-memory database
+        └── Handlers/
+            └── Todos.pm            # /todos endpoints
 ```

@@ -1,22 +1,30 @@
 # Bookstore API Example
 
-A comprehensive bookstore API demonstrating advanced PAGI::OpenAPI features.
+A comprehensive bookstore API demonstrating advanced PAGI::OpenAPI features
+with a proper lib/ directory structure.
 
 ## Features Demonstrated
 
+- **Proper lib/ structure** - Separate module files for clean organization
 - **Multiple handler classes** - Books, Authors, Reviews, Auth handlers
-- **Bearer token authentication** - Custom auth helper with `$c->bearer_token`
+- **Bearer token authentication** - Custom auth service with `$c->bearer_token`
 - **Resource relationships** - Books have authors, books have reviews
 - **Pagination** - Page/per_page query params with pagination metadata
 - **Filtering** - By author_id, genre
-- **Custom helpers** - `$c->db` for database, `$c->auth` for authentication
+- **Custom services** - `$c->db` for database, `$c->auth` for authentication
 - **Protected routes** - Some endpoints require authentication
-- **Complex responses** - Nested objects with related data
+- **home() auto-detection** - Schema and static files resolved relative to app home
+- **run_if_script** - Module is directly runnable without app.pl wrapper
 
 ## Running
 
 ```bash
 cd examples/bookstore-api
+
+# Run the module directly via pagi-server
+pagi-server -Ilib -I../../lib ./lib/BookstoreAPI.pm --port 5000
+
+# Or use the app.pl wrapper
 pagi-server --app app.pl --port 5000
 ```
 
@@ -95,31 +103,59 @@ curl -X POST http://localhost:5000/books/1/reviews \
   -d '{"rating": 5, "text": "Absolutely fantastic book!"}'
 ```
 
-## Code Structure
+## Directory Structure
 
 ```
-app.pl
-├── BookstoreAPI (main app)
-│   ├── openapi_schema() → schema.yaml
-│   ├── build_helpers() → { db, auth }
-│   └── on_startup() → seed sample data
-├── BookstoreAPI::Auth (token helper)
-│   ├── create_token()
-│   └── verify_token()
-├── BookstoreAPI::DB (in-memory database)
-│   ├── Book methods
-│   ├── Author methods
-│   └── Review methods
-└── Handlers
-    ├── BookstoreAPI::Handlers::Auth
-    ├── BookstoreAPI::Handlers::Books
-    ├── BookstoreAPI::Handlers::Authors
-    └── BookstoreAPI::Handlers::Reviews
+bookstore-api/
+├── app.pl                              # Entry point
+├── schema.yaml                         # OpenAPI schema
+├── public/
+│   └── index.html                      # Web frontend
+└── lib/
+    └── BookstoreAPI.pm                 # Main app class
+    └── BookstoreAPI/
+        ├── Auth.pm                     # Auth service
+        ├── DB.pm                       # In-memory database
+        └── Handlers/
+            ├── Auth.pm                 # POST /auth/token
+            ├── Authors.pm              # /authors endpoints
+            ├── Books.pm                # /books endpoints
+            └── Reviews.pm              # /books/{id}/reviews endpoints
+```
+
+## Key Concepts
+
+### Home Directory Auto-Detection
+
+The app automatically detects its home directory from the class location:
+
+```perl
+# In BookstoreAPI.pm
+sub openapi_schema { 'schema.yaml' }  # Relative to home
+
+# In setup_routes
+my $html = $app->home_path('public', 'index.html');
+```
+
+### Service Pattern
+
+Services use return-type-determines-scope:
+
+```perl
+sub setup_services {
+    my ($self) = @_;
+
+    # App-scoped: returns object directly
+    $self->service(db => sub {
+        my ($app) = @_;
+        return BookstoreAPI::DB->new;
+    });
+}
 ```
 
 ## Sample Data
 
 The API starts with sample data:
-- 3 authors (Tolkien, King, Asimov)
-- 4 books (LOTR, The Hobbit, The Shining, Foundation)
-- 5 reviews across the books
+- 8 authors (Tolkien, King, Asimov, Christie, Orwell, Austen, Dickens, Hemingway)
+- 24 books across various genres
+- 5 reviews

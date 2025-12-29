@@ -14,7 +14,7 @@ sub new {
         scope          => $args{scope},
         receive        => $args{receive},
         send           => $args{send},
-        helpers        => $args{helpers} // {},
+        services       => $args{services} // {},
         path_template  => $args{path_template},
         http_method    => $args{http_method},
         _req           => $args{_req},    # Can be pre-built
@@ -148,6 +148,8 @@ sub content_type_response {
 async sub json {
     my ($self, $data) = @_;
 
+    $self->{_response_started} = 1;
+
     # Response validation in dev mode
     if ($self->_is_dev_mode && $self->{app} && $self->{path_template}) {
         $self->_validate_response($data);
@@ -187,27 +189,32 @@ sub _validate_response {
 
 async sub text {
     my ($self, $text) = @_;
+    $self->{_response_started} = 1;
     await $self->res->text($text);
 }
 
 async sub html {
     my ($self, $html) = @_;
+    $self->{_response_started} = 1;
     await $self->res->html($html);
 }
 
 async sub send {
     my $self = shift;
+    $self->{_response_started} = 1;
     # Use send_raw for empty body (e.g., 204 responses)
     await $self->res->send_raw('');
 }
 
 async sub redirect {
     my ($self, $url, $status) = @_;
+    $self->{_response_started} = 1;
     await $self->res->redirect($url, $status);
 }
 
 async sub send_file {
     my ($self, $path, %opts) = @_;
+    $self->{_response_started} = 1;
     await $self->res->send_file($path, %opts);
 }
 
@@ -262,24 +269,83 @@ async sub server_error {
 }
 
 # ============================================================
-# Dynamic helper access via AUTOLOAD
+# URL Generation
+# ============================================================
+
+sub uri_for {
+    my ($self, $name, $path_params, $query_params) = @_;
+    my $router = $self->{app}{_router}
+        or croak "No router available for uri_for";
+    return $router->uri_for($name, $path_params, $query_params);
+}
+
+# ============================================================
+# Request-end callbacks (for request-scoped service cleanup)
+# ============================================================
+
+sub on_request_end {
+    my ($self, $cb) = @_;
+    push @{$self->stash->{_request_end_callbacks}}, $cb;
+}
+
+sub _run_request_end_callbacks {
+    my ($self) = @_;
+    for my $cb (@{$self->stash->{_request_end_callbacks} // []}) {
+        eval { $cb->() };
+        warn "Request end cleanup error: $@" if $@;
+    }
+}
+
+# ============================================================
+# Dynamic service access via AUTOLOAD
 # ============================================================
 
 our $AUTOLOAD;
 
 sub AUTOLOAD {
     my $self = shift;
+    my @args = @_;
     my ($method) = $AUTOLOAD =~ /::(\w+)$/;
 
     return if $method eq 'DESTROY';
 
-    # Check helpers
-    if (exists $self->{helpers}{$method}) {
-        return $self->{helpers}{$method};
+    # Check services
+    if (exists $self->{services}{$method}) {
+        return $self->_resolve_service($method, @args);
     }
 
-    croak "Unknown helper or method: $method. "
-        . "Available helpers: " . join(', ', sort keys %{$self->{helpers}});
+    my @available = sort keys %{$self->{services} // {}};
+
+    croak "Unknown service: $method. "
+        . "Available: " . join(', ', @available);
+}
+
+sub _resolve_service {
+    my ($self, $name, @args) = @_;
+
+    my $svc = $self->{services}{$name};
+
+    # Ensure factory has been called to determine scope
+    if (!defined $svc->{is_request_scoped}) {
+        $self->{app}->_get_service($name);
+    }
+
+    if ($svc->{is_request_scoped}) {
+        # Request-scoped: check cache first (only if no args)
+        my $key = "_svc_$name";
+        return $self->stash->{$key} if exists $self->stash->{$key} && !@args;
+
+        # Create new instance
+        my $instance = $svc->{request_factory}->($self, @args);
+
+        # Cache if no args (stateless access)
+        $self->stash->{$key} = $instance unless @args;
+
+        return $instance;
+    } else {
+        # App-scoped: return cached instance
+        return $svc->{instance};
+    }
 }
 
 # Prevent AUTOLOAD from catching can()
@@ -290,9 +356,9 @@ sub can {
     my $code = $self->SUPER::can($method);
     return $code if $code;
 
-    # Check if it's a helper
-    if (ref $self && exists $self->{helpers}{$method}) {
-        return sub { shift->{helpers}{$method} };
+    # Check if it's a service
+    if (ref $self && exists $self->{services}{$method}) {
+        return sub { shift->_resolve_service($method) };
     }
 
     return undef;
@@ -348,11 +414,11 @@ state, and custom helpers.
 =head2 new
 
     my $c = PAGI::OpenAPI::Context->new(
-        app     => $app,
-        scope   => $scope,
-        receive => $receive,
-        send    => $send,
-        helpers => { pg => $pg, redis => $redis },
+        app      => $app,
+        scope    => $scope,
+        receive  => $receive,
+        send     => $send,
+        services => $services,  # Service registry from app
     );
 
 Creates a new context object. Normally called by PAGI::OpenAPI, not directly.
@@ -456,25 +522,44 @@ C<json> and C<text> are reserved for sending responses.
 
 All error methods return JSON: C<< { error => "message", details => ... } >>
 
-=head1 HELPERS
+=head1 SERVICES
 
-Helpers are defined in your PAGI::OpenAPI subclass via C<build_helpers()>
+Services are defined in your PAGI::OpenAPI subclass via C<setup_services()>
 and accessed as methods on the context:
 
     # In your app
-    sub build_helpers {
-        my ($self, $state) = @_;
-        return {
-            pg     => $state->{pg},
-            redis  => $state->{redis},
-            config => $state->{config},
-        };
+    sub setup_services {
+        my ($self) = @_;
+
+        # App-scoped: returns object (singleton)
+        $self->service(db => sub {
+            my ($app) = @_;
+            return DBI->connect($dsn);
+        });
+
+        # Request-scoped: returns coderef (per-request)
+        $self->service(current_user => sub {
+            my ($app) = @_;
+            return sub {
+                my ($c) = @_;
+                return User->from_token($c->bearer_token);
+            };
+        });
     }
 
     # In handlers
-    my $result = await $c->pg->query_f(...);
-    my $cached = await $c->redis->get_f($key);
-    my $secret = $c->config->{jwt_secret};
+    my $db = $c->db;           # App-scoped service
+    my $user = $c->current_user; # Request-scoped service
+
+=head2 on_request_end
+
+    $c->on_request_end(sub {
+        # Cleanup code runs after response is sent
+        $transaction->rollback if $transaction->active;
+    });
+
+Register a callback to run when the request ends. Useful for cleaning up
+request-scoped resources like database transactions.
 
 =head1 SEE ALSO
 

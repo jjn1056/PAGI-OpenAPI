@@ -186,15 +186,21 @@
     <script>
         let todos = [];
         let filter = 'all';
+        let collectionLinks = { self: '/todos', create: '/todos' }; // Bootstrap, then discovered
 
         async function fetchTodos() {
-            let url = '/todos';
+            // Use discovered link, add filter as query param
+            let url = collectionLinks.self;
             if (filter === 'active') url += '?completed=false';
             else if (filter === 'completed') url += '?completed=true';
 
             const res = await fetch(url);
             const data = await res.json();
             todos = data.todos;
+            // Discover collection links from response
+            if (data._links) {
+                collectionLinks = data._links;
+            }
             render();
         }
 
@@ -204,7 +210,8 @@
             const title = input.value.trim();
             if (!title) return;
 
-            await fetch('/todos', {
+            // Use discovered create link
+            await fetch(collectionLinks.create, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ title })
@@ -214,11 +221,12 @@
             fetchTodos();
         }
 
-        async function toggleTodo(id, completed) {
-            if (!completed) {
-                await fetch(`/todos/${id}/complete`, { method: 'POST' });
+        async function toggleTodo(todo) {
+            // Use links from the todo itself
+            if (!todo.completed) {
+                await fetch(todo._links.complete, { method: 'POST' });
             } else {
-                await fetch(`/todos/${id}`, {
+                await fetch(todo._links.update, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ completed: false })
@@ -227,8 +235,9 @@
             fetchTodos();
         }
 
-        async function deleteTodo(id) {
-            await fetch(`/todos/${id}`, { method: 'DELETE' });
+        async function deleteTodo(todo) {
+            // Use delete link from the todo
+            await fetch(todo._links.delete, { method: 'DELETE' });
             fetchTodos();
         }
 
@@ -255,17 +264,17 @@
             if (todos.length === 0) {
                 list.innerHTML = '<li class="empty">No todos yet. Add one above!</li>';
             } else {
-                list.innerHTML = todos.map(todo => `
+                list.innerHTML = todos.map((todo, idx) => `
                     <li class="todo-item">
                         <input type="checkbox" class="todo-checkbox"
                             ${todo.completed ? 'checked' : ''}
-                            onchange="toggleTodo(${todo.id}, ${todo.completed})">
+                            onchange="toggleTodo(todos[${idx}])">
                         <div class="todo-content">
                             <div class="todo-title ${todo.completed ? 'completed' : ''}">${escapeHtml(todo.title)}</div>
                             ${todo.description ? `<div class="todo-desc">${escapeHtml(todo.description)}</div>` : ''}
                             <div class="todo-date">${formatDate(todo.created_at)}</div>
                         </div>
-                        <button class="delete-btn" onclick="deleteTodo(${todo.id})">Delete</button>
+                        <button class="delete-btn" onclick="deleteTodo(todos[${idx}])">Delete</button>
                     </li>
                 `).join('');
             }

@@ -26,20 +26,18 @@ package TestAPI {
     sub openapi_schema { $SCHEMA_PATH }
     sub enable_validation { 0 }  # Disable for basic tests
 
-    sub build_helpers {
-        my ($self, $state) = @_;
-        return {
-            items => $state->{items},
-        };
-    }
+    # Service registration - return type determines scope
+    sub setup_services {
+        my ($self) = @_;
 
-    async sub on_startup {
-        my ($self, $scope) = @_;
-        # In-memory items storage
-        $self->state->{items} = [
-            { id => 1, name => 'Item 1', description => 'First item' },
-            { id => 2, name => 'Item 2', description => 'Second item' },
-        ];
+        # App-scoped: items store (returns arrayref, persists across requests)
+        $self->service(items => sub {
+            my ($app) = @_;
+            return [
+                { id => 1, name => 'Item 1', description => 'First item' },
+                { id => 2, name => 'Item 2', description => 'Second item' },
+            ];
+        });
     }
 
     1;
