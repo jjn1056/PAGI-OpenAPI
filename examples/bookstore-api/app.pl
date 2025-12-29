@@ -22,9 +22,11 @@
 
 use strict;
 use warnings;
-use lib 'lib';
-use FindBin;
 use File::Spec;
+use File::Basename qw(dirname);
+
+# Get the directory containing this script
+my $APP_DIR = dirname(__FILE__);
 
 # ============================================================
 # Main Application
@@ -35,7 +37,7 @@ use parent 'PAGI::OpenAPI';
 use Future::AsyncAwait;
 
 sub openapi_schema {
-    File::Spec->catfile($FindBin::Bin, 'schema.yaml');
+    File::Spec->catfile($APP_DIR, 'schema.yaml');
 }
 
 # Disable validation for this demo (faster startup)
@@ -47,7 +49,7 @@ sub setup_routes {
 
     $r->get('/' => async sub {
         my ($req, $res) = @_;
-        my $html_path = File::Spec->catfile($FindBin::Bin, 'public', 'index.html');
+        my $html_path = File::Spec->catfile($APP_DIR, 'public', 'index.html');
         await $res->send_file($html_path);
     });
 }
