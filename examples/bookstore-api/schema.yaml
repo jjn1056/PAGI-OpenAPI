@@ -1,0 +1,469 @@
+openapi: 3.1.0
+info:
+  title: Bookstore API
+  description: |
+    A bookstore API demonstrating advanced PAGI::OpenAPI features:
+    - Multiple handler classes (Books, Authors, Reviews)
+    - Bearer token authentication
+    - Resource relationships
+    - Pagination and filtering
+  version: 1.0.0
+
+servers:
+  - url: http://localhost:5000
+
+security:
+  - bearerAuth: []
+
+paths:
+  # ============================================================
+  # Books
+  # ============================================================
+  /books:
+    get:
+      operationId: Books.list
+      summary: List books
+      security: []  # Public endpoint
+      parameters:
+        - name: author_id
+          in: query
+          description: Filter by author
+          schema:
+            type: integer
+        - name: genre
+          in: query
+          description: Filter by genre
+          schema:
+            type: string
+            enum: [fiction, non-fiction, sci-fi, mystery, romance, biography]
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 10
+      responses:
+        '200':
+          description: Paginated list of books
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BookList'
+
+    post:
+      operationId: Books.create
+      summary: Add a new book
+      description: Requires authentication
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BookInput'
+      responses:
+        '201':
+          description: Book created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Book'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /books/{id}:
+    parameters:
+      - $ref: '#/components/parameters/BookId'
+
+    get:
+      operationId: Books.get
+      summary: Get book details
+      security: []
+      responses:
+        '200':
+          description: Book details with author and reviews
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BookDetail'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    put:
+      operationId: Books.update
+      summary: Update a book
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BookInput'
+      responses:
+        '200':
+          description: Book updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Book'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    delete:
+      operationId: Books.delete
+      summary: Delete a book
+      responses:
+        '204':
+          description: Book deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ============================================================
+  # Authors
+  # ============================================================
+  /authors:
+    get:
+      operationId: Authors.list
+      summary: List authors
+      security: []
+      responses:
+        '200':
+          description: List of authors
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  authors:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Author'
+
+    post:
+      operationId: Authors.create
+      summary: Add a new author
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthorInput'
+      responses:
+        '201':
+          description: Author created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Author'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /authors/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+
+    get:
+      operationId: Authors.get
+      summary: Get author with their books
+      security: []
+      responses:
+        '200':
+          description: Author details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthorDetail'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ============================================================
+  # Reviews
+  # ============================================================
+  /books/{id}/reviews:
+    parameters:
+      - $ref: '#/components/parameters/BookId'
+
+    get:
+      operationId: Reviews.list
+      summary: Get reviews for a book
+      security: []
+      responses:
+        '200':
+          description: List of reviews
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reviews:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Review'
+                  average_rating:
+                    type: number
+                    format: float
+
+    post:
+      operationId: Reviews.create
+      summary: Add a review
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReviewInput'
+      responses:
+        '201':
+          description: Review created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Review'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ============================================================
+  # Auth (for demo purposes)
+  # ============================================================
+  /auth/token:
+    post:
+      operationId: Auth.login
+      summary: Get an auth token
+      description: Returns a demo token. Use any username/password.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username:
+                  type: string
+                password:
+                  type: string
+      responses:
+        '200':
+          description: Auth token
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token:
+                    type: string
+                  user:
+                    type: string
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Use the token from /auth/token
+
+  parameters:
+    BookId:
+      name: id
+      in: path
+      required: true
+      description: Book ID
+      schema:
+        type: integer
+
+  responses:
+    Unauthorized:
+      description: Authentication required
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    BadRequest:
+      description: Invalid request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+  schemas:
+    Book:
+      type: object
+      required: [id, title, author_id, genre]
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        author_id:
+          type: integer
+        genre:
+          type: string
+        isbn:
+          type: string
+        published_year:
+          type: integer
+        price:
+          type: number
+          format: float
+
+    BookInput:
+      type: object
+      required: [title, author_id, genre]
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+        author_id:
+          type: integer
+        genre:
+          type: string
+          enum: [fiction, non-fiction, sci-fi, mystery, romance, biography]
+        isbn:
+          type: string
+          pattern: '^\d{10}|\d{13}$'
+        published_year:
+          type: integer
+          minimum: 1000
+          maximum: 2100
+        price:
+          type: number
+          minimum: 0
+
+    BookDetail:
+      allOf:
+        - $ref: '#/components/schemas/Book'
+        - type: object
+          properties:
+            author:
+              $ref: '#/components/schemas/Author'
+            reviews:
+              type: array
+              items:
+                $ref: '#/components/schemas/Review'
+            average_rating:
+              type: number
+
+    BookList:
+      type: object
+      required: [books, pagination]
+      properties:
+        books:
+          type: array
+          items:
+            $ref: '#/components/schemas/Book'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    Author:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        bio:
+          type: string
+        book_count:
+          type: integer
+
+    AuthorInput:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        bio:
+          type: string
+          maxLength: 2000
+
+    AuthorDetail:
+      allOf:
+        - $ref: '#/components/schemas/Author'
+        - type: object
+          properties:
+            books:
+              type: array
+              items:
+                $ref: '#/components/schemas/Book'
+
+    Review:
+      type: object
+      required: [id, book_id, rating, text]
+      properties:
+        id:
+          type: integer
+        book_id:
+          type: integer
+        user:
+          type: string
+        rating:
+          type: integer
+          minimum: 1
+          maximum: 5
+        text:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    ReviewInput:
+      type: object
+      required: [rating, text]
+      properties:
+        rating:
+          type: integer
+          minimum: 1
+          maximum: 5
+        text:
+          type: string
+          minLength: 10
+          maxLength: 1000
+
+    Pagination:
+      type: object
+      properties:
+        page:
+          type: integer
+        per_page:
+          type: integer
+        total:
+          type: integer
+        total_pages:
+          type: integer
+
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+        details:
+          type: object

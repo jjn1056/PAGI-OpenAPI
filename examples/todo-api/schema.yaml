@@ -1,0 +1,199 @@
+openapi: 3.1.0
+info:
+  title: Todo API
+  description: A simple todo list API demonstrating PAGI::OpenAPI basics
+  version: 1.0.0
+
+servers:
+  - url: http://localhost:5000
+
+paths:
+  /todos:
+    get:
+      operationId: Todos.list
+      summary: List all todos
+      description: Returns all todos, optionally filtered by completion status
+      parameters:
+        - name: completed
+          in: query
+          description: Filter by completion status
+          schema:
+            type: boolean
+        - name: limit
+          in: query
+          description: Maximum number of results
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        '200':
+          description: List of todos
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [todos, total]
+                properties:
+                  todos:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Todo'
+                  total:
+                    type: integer
+
+    post:
+      operationId: Todos.create
+      summary: Create a new todo
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TodoInput'
+      responses:
+        '201':
+          description: Todo created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Todo'
+        '400':
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /todos/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: Todo ID
+        schema:
+          type: integer
+
+    get:
+      operationId: Todos.get
+      summary: Get a specific todo
+      responses:
+        '200':
+          description: Todo found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Todo'
+        '404':
+          description: Todo not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    put:
+      operationId: Todos.update
+      summary: Update a todo
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TodoInput'
+      responses:
+        '200':
+          description: Todo updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Todo'
+        '404':
+          description: Todo not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    delete:
+      operationId: Todos.delete
+      summary: Delete a todo
+      responses:
+        '204':
+          description: Todo deleted
+        '404':
+          description: Todo not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /todos/{id}/complete:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+
+    post:
+      operationId: Todos.complete
+      summary: Mark a todo as complete
+      responses:
+        '200':
+          description: Todo marked complete
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Todo'
+        '404':
+          description: Todo not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+components:
+  schemas:
+    Todo:
+      type: object
+      required: [id, title, completed, created_at]
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        description:
+          type: string
+        completed:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+
+    TodoInput:
+      type: object
+      required: [title]
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 200
+        description:
+          type: string
+          maxLength: 1000
+        completed:
+          type: boolean
+          default: false
+
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+        details:
+          type: object
