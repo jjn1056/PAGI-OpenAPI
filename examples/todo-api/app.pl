@@ -6,7 +6,6 @@
 
 use strict;
 use warnings;
-use lib 'lib';
 use FindBin;
 use File::Spec;
 
@@ -20,6 +19,17 @@ use Future::AsyncAwait;
 
 sub openapi_schema {
     File::Spec->catfile($FindBin::Bin, 'schema.yaml');
+}
+
+# Serve the web frontend
+sub setup_routes {
+    my ($self, $r) = @_;
+
+    $r->get('/' => async sub {
+        my ($req, $res) = @_;
+        my $html_path = File::Spec->catfile($FindBin::Bin, 'public', 'index.html');
+        await $res->send_file($html_path);
+    });
 }
 
 sub build_helpers {
@@ -50,7 +60,9 @@ async sub on_startup {
         },
     ]);
 
-    print "Todo API started! Visit http://localhost:5000/docs\n";
+    print "Todo API started!\n";
+    print "  Web App: http://localhost:5000/\n";
+    print "  API Docs: http://localhost:5000/docs\n";
 }
 
 1;

@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bookstore</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f5f5;
+            min-height: 100vh;
+        }
+        .navbar {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: white;
+            padding: 16px 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+        }
+        .navbar h1 { font-size: 1.5em; }
+        .navbar h1 span { margin-right: 8px; }
+        .auth-section { display: flex; gap: 12px; align-items: center; }
+        .auth-section input {
+            padding: 8px 12px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+        .auth-section button, .btn {
+            padding: 8px 16px;
+            background: #e94560;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background 0.2s;
+        }
+        .auth-section button:hover, .btn:hover { background: #d63050; }
+        .btn-secondary { background: #0f3460; }
+        .btn-secondary:hover { background: #1a4a7a; }
+        .user-info {
+            background: rgba(255,255,255,0.1);
+            padding: 8px 16px;
+            border-radius: 6px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 24px;
+        }
+        .filters {
+            background: white;
+            padding: 20px;
+            border-radius: 12px;
+            margin-bottom: 24px;
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+            align-items: center;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        .filters select {
+            padding: 10px 16px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 14px;
+            background: white;
+            cursor: pointer;
+        }
+        .filters select:focus { outline: none; border-color: #e94560; }
+        .book-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 24px;
+        }
+        .book-card {
+            background: white;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            transition: transform 0.2s, box-shadow 0.2s;
+            cursor: pointer;
+        }
+        .book-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+        }
+        .book-cover {
+            height: 180px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 3em;
+        }
+        .book-info { padding: 20px; }
+        .book-title {
+            font-size: 1.1em;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #1a1a2e;
+        }
+        .book-author { color: #666; font-size: 0.9em; margin-bottom: 8px; }
+        .book-meta {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 12px;
+        }
+        .book-genre {
+            background: #f0f0f0;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.8em;
+            color: #666;
+        }
+        .book-price { font-weight: 600; color: #e94560; }
+        .book-rating { color: #ffc107; }
+        .pagination {
+            display: flex;
+            justify-content: center;
+            gap: 8px;
+            margin-top: 24px;
+        }
+        .pagination button {
+            padding: 10px 20px;
+            border: 2px solid #e0e0e0;
+            background: white;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .pagination button:hover:not(:disabled) {
+            border-color: #e94560;
+            color: #e94560;
+        }
+        .pagination button:disabled { opacity: 0.5; cursor: not-allowed; }
+        .pagination span { padding: 10px 20px; }
+
+        /* Modal */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.6);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+        .modal.active { display: flex; }
+        .modal-content {
+            background: white;
+            border-radius: 16px;
+            max-width: 600px;
+            width: 90%;
+            max-height: 90vh;
+            overflow-y: auto;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+        .modal-header {
+            padding: 24px;
+            border-bottom: 1px solid #e0e0e0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .modal-header h2 { font-size: 1.3em; }
+        .modal-close {
+            background: none;
+            border: none;
+            font-size: 1.5em;
+            cursor: pointer;
+            color: #999;
+        }
+        .modal-close:hover { color: #333; }
+        .modal-body { padding: 24px; }
+        .detail-meta { color: #666; margin-bottom: 16px; }
+        .detail-meta span { margin-right: 16px; }
+        .reviews-section { margin-top: 24px; }
+        .reviews-section h3 { margin-bottom: 16px; color: #1a1a2e; }
+        .review {
+            background: #f8f9fa;
+            padding: 16px;
+            border-radius: 8px;
+            margin-bottom: 12px;
+        }
+        .review-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }
+        .review-user { font-weight: 600; }
+        .review-rating { color: #ffc107; }
+        .review-text { color: #555; line-height: 1.5; }
+        .review-date { font-size: 0.8em; color: #999; margin-top: 8px; }
+        .add-review { margin-top: 20px; }
+        .add-review textarea {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 14px;
+            resize: vertical;
+            min-height: 80px;
+        }
+        .add-review textarea:focus { outline: none; border-color: #e94560; }
+        .rating-select { margin: 12px 0; }
+        .rating-select label { margin-right: 8px; }
+        .api-link {
+            text-align: center;
+            margin-top: 24px;
+            padding: 16px;
+        }
+        .api-link a { color: #666; text-decoration: none; }
+        .api-link a:hover { color: #e94560; text-decoration: underline; }
+    </style>
+</head>
+<body>
+    <nav class="navbar">
+        <h1><span>📚</span> Bookstore</h1>
+        <div class="auth-section" id="authSection">
+            <input type="text" id="username" placeholder="Username" value="demo">
+            <button onclick="login()">Login</button>
+        </div>
+    </nav>
+
+    <div class="container">
+        <div class="filters">
+            <label>Genre:</label>
+            <select id="genreFilter" onchange="fetchBooks()">
+                <option value="">All Genres</option>
+                <option value="fiction">Fiction</option>
+                <option value="non-fiction">Non-Fiction</option>
+                <option value="sci-fi">Sci-Fi</option>
+                <option value="mystery">Mystery</option>
+                <option value="romance">Romance</option>
+                <option value="biography">Biography</option>
+            </select>
+
+            <label>Author:</label>
+            <select id="authorFilter" onchange="fetchBooks()">
+                <option value="">All Authors</option>
+            </select>
+        </div>
+
+        <div class="book-grid" id="bookGrid"></div>
+
+        <div class="pagination" id="pagination"></div>
+    </div>
+
+    <div class="api-link">
+        <a href="/docs">📖 View API Documentation</a>
+    </div>
+
+    <!-- Book Detail Modal -->
+    <div class="modal" id="bookModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="modalTitle"></h2>
+                <button class="modal-close" onclick="closeModal()">&times;</button>
+            </div>
+            <div class="modal-body" id="modalBody"></div>
+        </div>
+    </div>
+
+    <script>
+        let token = null;
+        let currentUser = null;
+        let books = [];
+        let authors = [];
+        let pagination = { page: 1, per_page: 10 };
+
+        async function login() {
+            const username = document.getElementById('username').value || 'demo';
+            const res = await fetch('/auth/token', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, password: 'demo' })
+            });
+            const data = await res.json();
+            token = data.token;
+            currentUser = data.user;
+            updateAuthUI();
+        }
+
+        function logout() {
+            token = null;
+            currentUser = null;
+            updateAuthUI();
+        }
+
+        function updateAuthUI() {
+            const section = document.getElementById('authSection');
+            if (currentUser) {
+                section.innerHTML = `
+                    <span class="user-info">👤 ${escapeHtml(currentUser)}</span>
+                    <button onclick="logout()">Logout</button>
+                `;
+            } else {
+                section.innerHTML = `
+                    <input type="text" id="username" placeholder="Username" value="demo">
+                    <button onclick="login()">Login</button>
+                `;
+            }
+        }
+
+        async function fetchAuthors() {
+            const res = await fetch('/authors');
+            const data = await res.json();
+            authors = data.authors;
+
+            const select = document.getElementById('authorFilter');
+            select.innerHTML = '<option value="">All Authors</option>' +
+                authors.map(a => `<option value="${a.id}">${escapeHtml(a.name)}</option>`).join('');
+        }
+
+        async function fetchBooks() {
+            const genre = document.getElementById('genreFilter').value;
+            const authorId = document.getElementById('authorFilter').value;
+
+            let url = `/books?page=${pagination.page}&per_page=${pagination.per_page}`;
+            if (genre) url += `&genre=${genre}`;
+            if (authorId) url += `&author_id=${authorId}`;
+
+            const res = await fetch(url);
+            const data = await res.json();
+            books = data.books;
+            pagination = data.pagination;
+            renderBooks();
+            renderPagination();
+        }
+
+        function renderBooks() {
+            const grid = document.getElementById('bookGrid');
+            grid.innerHTML = books.map(book => {
+                const author = authors.find(a => a.id === book.author_id);
+                const icons = ['📕', '📗', '📘', '📙'];
+                const icon = icons[book.id % icons.length];
+                return `
+                    <div class="book-card" onclick="showBookDetail(${book.id})">
+                        <div class="book-cover">${icon}</div>
+                        <div class="book-info">
+                            <div class="book-title">${escapeHtml(book.title)}</div>
+                            <div class="book-author">by ${author ? escapeHtml(author.name) : 'Unknown'}</div>
+                            <div class="book-meta">
+                                <span class="book-genre">${book.genre}</span>
+                                <span class="book-price">$${book.price?.toFixed(2) || '0.00'}</span>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function renderPagination() {
+            const div = document.getElementById('pagination');
+            const { page, total_pages } = pagination;
+            div.innerHTML = `
+                <button onclick="goToPage(${page - 1})" ${page <= 1 ? 'disabled' : ''}>← Previous</button>
+                <span>Page ${page} of ${total_pages}</span>
+                <button onclick="goToPage(${page + 1})" ${page >= total_pages ? 'disabled' : ''}>Next →</button>
+            `;
+        }
+
+        function goToPage(page) {
+            pagination.page = page;
+            fetchBooks();
+        }
+
+        async function showBookDetail(id) {
+            const res = await fetch(`/books/${id}`);
+            const book = await res.json();
+
+            document.getElementById('modalTitle').textContent = book.title;
+            document.getElementById('modalBody').innerHTML = `
+                <div class="detail-meta">
+                    <span>📖 by <strong>${escapeHtml(book.author?.name || 'Unknown')}</strong></span>
+                    <span>📅 ${book.published_year || 'N/A'}</span>
+                    <span class="book-genre">${book.genre}</span>
+                    <span class="book-price">$${book.price?.toFixed(2) || '0.00'}</span>
+                </div>
+                ${book.isbn ? `<p>ISBN: ${book.isbn}</p>` : ''}
+
+                <div class="reviews-section">
+                    <h3>Reviews ${book.average_rating ? `(★ ${book.average_rating})` : ''}</h3>
+                    ${book.reviews?.length ? book.reviews.map(r => `
+                        <div class="review">
+                            <div class="review-header">
+                                <span class="review-user">👤 ${escapeHtml(r.user)}</span>
+                                <span class="review-rating">${'★'.repeat(r.rating)}${'☆'.repeat(5-r.rating)}</span>
+                            </div>
+                            <div class="review-text">${escapeHtml(r.text)}</div>
+                            <div class="review-date">${formatDate(r.created_at)}</div>
+                        </div>
+                    `).join('') : '<p>No reviews yet.</p>'}
+
+                    ${currentUser ? `
+                        <div class="add-review">
+                            <h4>Add Your Review</h4>
+                            <div class="rating-select">
+                                <label>Rating:</label>
+                                <select id="reviewRating">
+                                    <option value="5">★★★★★ (5)</option>
+                                    <option value="4">★★★★☆ (4)</option>
+                                    <option value="3">★★★☆☆ (3)</option>
+                                    <option value="2">★★☆☆☆ (2)</option>
+                                    <option value="1">★☆☆☆☆ (1)</option>
+                                </select>
+                            </div>
+                            <textarea id="reviewText" placeholder="Write your review (min 10 characters)..."></textarea>
+                            <button class="btn" style="margin-top: 12px" onclick="submitReview(${id})">Submit Review</button>
+                        </div>
+                    ` : '<p style="color: #999; margin-top: 16px;">Login to add a review</p>'}
+                </div>
+            `;
+            document.getElementById('bookModal').classList.add('active');
+        }
+
+        async function submitReview(bookId) {
+            const rating = parseInt(document.getElementById('reviewRating').value);
+            const text = document.getElementById('reviewText').value;
+
+            if (text.length < 10) {
+                alert('Review must be at least 10 characters');
+                return;
+            }
+
+            const res = await fetch(`/books/${bookId}/reviews`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({ rating, text })
+            });
+
+            if (res.ok) {
+                showBookDetail(bookId);  // Refresh
+            } else {
+                const err = await res.json();
+                alert(err.error || 'Failed to submit review');
+            }
+        }
+
+        function closeModal() {
+            document.getElementById('bookModal').classList.remove('active');
+        }
+
+        function formatDate(dateStr) {
+            if (!dateStr) return '';
+            return new Date(dateStr).toLocaleDateString('en-US', {
+                year: 'numeric', month: 'short', day: 'numeric'
+            });
+        }
+
+        function escapeHtml(text) {
+            if (!text) return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Close modal on outside click
+        document.getElementById('bookModal').addEventListener('click', (e) => {
+            if (e.target.classList.contains('modal')) closeModal();
+        });
+
+        // Initial load
+        fetchAuthors().then(fetchBooks);
+    </script>
+</body>
+</html>

@@ -41,6 +41,17 @@ sub openapi_schema {
 # Disable validation for this demo (faster startup)
 sub enable_validation { 0 }
 
+# Serve the web frontend
+sub setup_routes {
+    my ($self, $r) = @_;
+
+    $r->get('/' => async sub {
+        my ($req, $res) = @_;
+        my $html_path = File::Spec->catfile($FindBin::Bin, 'public', 'index.html');
+        await $res->send_file($html_path);
+    });
+}
+
 sub build_helpers {
     my ($self, $state) = @_;
     return {
@@ -57,8 +68,8 @@ async sub on_startup {
     $self->state->{db}->seed_data;
 
     print "Bookstore API started!\n";
-    print "  Docs: http://localhost:5000/docs\n";
-    print "  Get token: POST /auth/token with {\"username\":\"demo\",\"password\":\"demo\"}\n";
+    print "  Web App: http://localhost:5000/\n";
+    print "  API Docs: http://localhost:5000/docs\n";
 }
 
 1;
