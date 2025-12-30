@@ -5,6 +5,19 @@ use warnings;
 use parent 'PAGI::OpenAPI::Handler';
 use Future::AsyncAwait;
 
+# Generate HATEOAS links for a todo item
+sub _todo_links {
+    my ($self, $c, $todo) = @_;
+    my $id = $todo->{id};
+    return {
+        self   => $c->uri_for('Todos.get', { id => $id }),
+        list   => $c->uri_for('Todos.list'),
+        update => $c->uri_for('Todos.update', { id => $id }),
+        delete => $c->uri_for('Todos.delete', { id => $id }),
+        (!$todo->{completed} ? (complete => $c->uri_for('Todos.complete', { id => $id })) : ()),
+    };
+}
+
 async sub list {
     my ($self, $c) = @_;
 
@@ -19,14 +32,7 @@ async sub list {
     my $total = $c->todos->total;
 
     # Add HATEOAS links to each todo
-    for my $todo (@$todos) {
-        $todo->{_links} = {
-            self     => $c->uri_for('Todos.get', { id => $todo->{id} }),
-            update   => $c->uri_for('Todos.update', { id => $todo->{id} }),
-            delete   => $c->uri_for('Todos.delete', { id => $todo->{id} }),
-            complete => $c->uri_for('Todos.complete', { id => $todo->{id} }),
-        };
-    }
+    $_->{_links} = $self->_todo_links($c, $_) for @$todos;
 
     await $c->json({
         todos  => $todos,
@@ -46,15 +52,7 @@ async sub get {
 
     return await $c->not_found("Todo $id not found") unless $todo;
 
-    # Add HATEOAS links
-    $todo->{_links} = {
-        self     => $c->uri_for('Todos.get', { id => $id }),
-        list     => $c->uri_for('Todos.list'),
-        update   => $c->uri_for('Todos.update', { id => $id }),
-        delete   => $c->uri_for('Todos.delete', { id => $id }),
-        complete => $c->uri_for('Todos.complete', { id => $id }),
-    };
-
+    $todo->{_links} = $self->_todo_links($c, $todo);
     await $c->json($todo);
 }
 
@@ -64,15 +62,8 @@ async sub create {
     my $data = await $c->request_json;
     my $todo = $c->todos->create($data);
 
-    # Add Location header and HATEOAS links
     my $location = $c->uri_for('Todos.get', { id => $todo->{id} });
-    $todo->{_links} = {
-        self     => $location,
-        list     => $c->uri_for('Todos.list'),
-        update   => $c->uri_for('Todos.update', { id => $todo->{id} }),
-        delete   => $c->uri_for('Todos.delete', { id => $todo->{id} }),
-        complete => $c->uri_for('Todos.complete', { id => $todo->{id} }),
-    };
+    $todo->{_links} = $self->_todo_links($c, $todo);
 
     await $c->status(201)->set_header('Location' => $location)->json($todo);
 }
@@ -86,14 +77,7 @@ async sub update {
 
     return await $c->not_found("Todo $id not found") unless $todo;
 
-    # Add HATEOAS links
-    $todo->{_links} = {
-        self     => $c->uri_for('Todos.get', { id => $id }),
-        list     => $c->uri_for('Todos.list'),
-        delete   => $c->uri_for('Todos.delete', { id => $id }),
-        complete => $c->uri_for('Todos.complete', { id => $id }),
-    };
-
+    $todo->{_links} = $self->_todo_links($c, $todo);
     await $c->json($todo);
 }
 
@@ -115,13 +99,7 @@ async sub complete {
 
     return await $c->not_found("Todo $id not found") unless $todo;
 
-    # Add HATEOAS links
-    $todo->{_links} = {
-        self   => $c->uri_for('Todos.get', { id => $id }),
-        list   => $c->uri_for('Todos.list'),
-        delete => $c->uri_for('Todos.delete', { id => $id }),
-    };
-
+    $todo->{_links} = $self->_todo_links($c, $todo);
     await $c->json($todo);
 }
 

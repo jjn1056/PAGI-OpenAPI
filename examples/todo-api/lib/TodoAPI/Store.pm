@@ -25,8 +25,8 @@ sub all {
         @items = grep { $_->{completed} == $want } @items;
     }
 
-    if ($filter{limit}) {
-        @items = @items[0 .. ($filter{limit} - 1)] if @items > $filter{limit};
+    if ($filter{limit} && @items > $filter{limit}) {
+        splice @items, $filter{limit};
     }
 
     return \@items;

@@ -30,6 +30,9 @@ sub enable_docs { 1 }
 # Enable request validation
 sub enable_validation { 1 }
 
+# Maximum request body size in bytes (10MB default, 0 = unlimited)
+sub max_request_body_size { 10 * 1024 * 1024 }
+
 # Separator in operationId (Handler.method)
 sub operation_separator { '.' }
 
@@ -233,8 +236,27 @@ sub _get_service {
     return $svc->{instance} if defined $svc->{instance};
     return undef if $svc->{is_request_scoped};
 
+    # Prevent concurrent resolution (race condition)
+    # If already resolving, wait/skip - another call will complete it
+    if ($svc->{_resolving}) {
+        # Service is being resolved by another call, return undef for now
+        # The caller will retry or fail appropriately
+        croak "Circular dependency detected resolving service: $name";
+    }
+
+    # Mark as resolving to prevent re-entry
+    $svc->{_resolving} = 1;
+
     # First-time resolution: call factory to determine scope
-    my $result = $svc->{factory}->($self);
+    my $result = eval { $svc->{factory}->($self) };
+    my $error = $@;
+
+    # Clear resolving flag
+    $svc->{_resolving} = 0;
+
+    if ($error) {
+        croak "Error resolving service '$name': $error";
+    }
 
     if (ref($result) eq 'CODE') {
         # Returns coderef -> request-scoped
@@ -263,6 +285,11 @@ sub _run_shutdown_callbacks {
         eval { $cb->() };
         warn "Shutdown cleanup error: $@" if $@;
     }
+}
+
+# Check if we're in development mode (defaults to production for security)
+sub _is_dev_mode {
+    return ($ENV{PAGI_ENV} // 'production') eq 'development';
 }
 
 # ============================================================
@@ -346,6 +373,10 @@ async sub serve_docs {
 sub _load_schema {
     my ($self, $file) = @_;
 
+    # Security: reject path traversal attempts
+    croak "Invalid schema path: contains path traversal"
+        if $file =~ /\.\./;
+
     # Resolve relative paths against home directory
     my $schema_path = path($file);
     unless ($schema_path->is_absolute) {
@@ -353,6 +384,12 @@ sub _load_schema {
     }
 
     croak "Schema file not found: $schema_path" unless $schema_path->is_file;
+
+    # Security: verify resolved path is within home directory
+    my $real_path = $schema_path->realpath;
+    my $home_real = $self->home->realpath;
+    croak "Schema path outside application directory: $file"
+        unless $home_real->subsumes($real_path);
 
     $file = $schema_path->stringify;
 
@@ -419,7 +456,8 @@ sub _wire_operations {
             );
 
             # Register route with operationId as name
-            $r->$method($pagi_path => $handler)->name($op_id);
+            $r->$method($pagi_path => $handler);
+            $r->name($op_id);
         }
     }
 }
@@ -428,17 +466,28 @@ sub _parse_operation_id {
     my ($self, $op_id) = @_;
 
     my $sep = quotemeta($self->operation_separator);
+    my ($handler_name, $method_name);
 
     if ($op_id =~ /^(\w+)${sep}(\w+)$/) {
-        return ($1, $2);
+        ($handler_name, $method_name) = ($1, $2);
+    } else {
+        # No namespace - use Default handler, convert camelCase to snake_case
+        $handler_name = 'Default';
+        $method_name = $op_id;
+        $method_name =~ s/([a-z])([A-Z])/${1}_\L$2/g;
+        $method_name = lc($method_name);
     }
 
-    # No namespace - use Default handler, convert camelCase to snake_case
-    my $method_name = $op_id;
-    $method_name =~ s/([a-z])([A-Z])/${1}_\L$2/g;
-    $method_name = lc($method_name);
+    # Security: reject handler/method names starting with underscore
+    # These are Perl private methods and should not be exposed via API
+    if ($handler_name =~ /^_/) {
+        croak "Invalid operationId '$op_id': handler name cannot start with underscore";
+    }
+    if ($method_name =~ /^_/) {
+        croak "Invalid operationId '$op_id': method name cannot start with underscore";
+    }
 
-    return ('Default', $method_name);
+    return ($handler_name, $method_name);
 }
 
 sub _build_handler {
@@ -456,95 +505,135 @@ sub _build_handler {
     return async sub {
         my ($req, $res) = @_;
 
-        # Get scope from request for context and validation
-        my $scope = $req->{scope};
-
-        # Create context with request/response objects
-        require PAGI::OpenAPI::Context;
-        my $c = PAGI::OpenAPI::Context->new(
-            app           => $app,
-            scope         => $scope,
-            receive       => $req->{receive},
-            send          => $res->{send},
-            services      => $app->{_services},
-            path_template => $path_template,
-            http_method   => $http_method,
-            _req          => $req,  # Reuse existing request object
-            _res          => $res,  # Reuse existing response object
-        );
+        my $c = $app->_create_context($req, $res, $path_template, $http_method);
 
         # Validate request if enabled
         if ($app->enable_validation && $app->state->{_openapi}) {
-            # Buffer body for validation (if there's content)
-            if ($c->req->content_length) {
-                await $c->body;
-            }
-
-            require PAGI::OpenAPI::Bridge;
-            my $result = PAGI::OpenAPI::Bridge->validate_request(
-                $app->state->{_openapi},
-                $scope,
-                path_template => $path_template,
-                path_captures => $scope->{path_params},
-                method        => $http_method,
+            my $validation_error = await $app->_validate_request(
+                $c, $path_template, $http_method
             );
-
-            if (!$result->valid) {
-                $c->_run_request_end_callbacks;
-                return await $c->status(400)->json({
-                    error   => 'Request validation failed',
-                    details => $result->TO_JSON,
-                });
-            }
+            return $validation_error if $validation_error;
         }
 
-        # Get handler instance
-        my $handler = eval { $app->_get_handler($handler_name) };
-        if ($@) {
-            my $error = $@;
-            warn "Handler loading error: $error";
-            $c->_run_request_end_callbacks;
-            return await $c->status(500)->json({
-                error   => 'Internal server error',
-                message => ($ENV{PAGI_ENV} // '') eq 'development' ? "$error" : undef,
-            });
-        }
-
-        # Call method
-        my $code = $handler->can($method_name);
-        unless ($code) {
-            my $msg = "No method '$method_name' in " . ref($handler)
-                    . " (for operationId: $handler_name.$method_name)";
-            warn $msg;
-            $c->_run_request_end_callbacks;
-            return await $c->status(500)->json({
-                error   => 'Internal server error',
-                message => ($ENV{PAGI_ENV} // '') eq 'development' ? $msg : undef,
-            });
-        }
-
-        my $result = eval { await $handler->$code($c) };
-        my $error = $@;
-
-        # Always run request-end callbacks
-        $c->_run_request_end_callbacks;
-
-        # If handler threw an error and no response was sent, return 500
-        if ($error) {
-            warn "Handler error: $error";
-            # Check if response was already started
-            if (!$c->{_response_started}) {
-                return await $c->status(500)->json({
-                    error   => 'Internal server error',
-                    message => ($ENV{PAGI_ENV} // '') eq 'development' ? "$error" : undef,
-                });
-            }
-            # Response already started, can't send error response
-            die $error;
-        }
-
-        return $result;
+        # Invoke handler and return result
+        return await $app->_invoke_handler($c, $handler_name, $method_name);
     };
+}
+
+sub _create_context {
+    my ($self, $req, $res, $path_template, $http_method) = @_;
+
+    require PAGI::OpenAPI::Context;
+    return PAGI::OpenAPI::Context->new(
+        app           => $self,
+        scope         => $req->{scope},
+        receive       => $req->{receive},
+        send          => $res->{send},
+        services      => $self->{_services},
+        path_template => $path_template,
+        http_method   => $http_method,
+        _req          => $req,
+        _res          => $res,
+    );
+}
+
+async sub _validate_request {
+    my ($self, $c, $path_template, $http_method) = @_;
+
+    my $max_size = $self->max_request_body_size;
+    my $content_length = $c->req->content_length;
+
+    # Pre-check: reject if Content-Length exceeds limit
+    if ($max_size && $content_length && $content_length > $max_size) {
+        $c->_run_request_end_callbacks;
+        return await $c->status(413)->json({
+            error => 'Request entity too large',
+        });
+    }
+
+    # Buffer body for validation (handles chunked encoding too)
+    # Pass max_size to enforce limit during streaming
+    my $body = await $c->body;
+
+    # Post-check: verify actual body size (catches chunked encoding bypass)
+    if ($max_size && defined($body) && length($body) > $max_size) {
+        $c->_run_request_end_callbacks;
+        return await $c->status(413)->json({
+            error => 'Request entity too large',
+        });
+    }
+
+    require PAGI::OpenAPI::Bridge;
+    my $result = PAGI::OpenAPI::Bridge->validate_request(
+        $self->state->{_openapi},
+        $c->{scope},
+        path_template => $path_template,
+        path_captures => $c->{scope}{path_params},
+        method        => $http_method,
+    );
+
+    if (!$result->valid) {
+        $c->_run_request_end_callbacks;
+        return await $c->status(400)->json({
+            error   => 'Request validation failed',
+            details => $result->TO_JSON,
+        });
+    }
+
+    return;  # No error
+}
+
+async sub _invoke_handler {
+    my ($self, $c, $handler_name, $method_name) = @_;
+
+    # Get handler instance
+    my $handler = eval { $self->_get_handler($handler_name) };
+    if ($@) {
+        my $error = $@;
+        warn "Handler loading error: $error";
+        $c->_run_request_end_callbacks;
+        return await $c->status(500)->json({
+            error   => 'Internal server error',
+            ($self->_is_dev_mode ? (message => "$error") : ()),
+        });
+    }
+
+    # Verify method exists
+    my $code = $handler->can($method_name);
+    unless ($code) {
+        my $msg = "No method '$method_name' in " . ref($handler)
+                . " (for operationId: $handler_name.$method_name)";
+        warn $msg;
+        $c->_run_request_end_callbacks;
+        return await $c->status(500)->json({
+            error   => 'Internal server error',
+            ($self->_is_dev_mode ? (message => $msg) : ()),
+        });
+    }
+
+    # Call handler method
+    my $result = eval { await $handler->$code($c) };
+    my $error = $@;
+
+    # Always run request-end callbacks
+    $c->_run_request_end_callbacks;
+
+    # Handle errors
+    if ($error) {
+        warn "Handler error: $error";
+        if (!$c->{_response_started}) {
+            return await $c->status(500)->json({
+                error   => 'Internal server error',
+                ($self->_is_dev_mode ? (message => "$error") : ()),
+            });
+        }
+        # Response already started - can't send error response, just log it
+        # Don't die as it could crash the server; the partial response was
+        # already sent and the connection will close normally
+        warn "Handler error after response started (cannot recover): $error";
+    }
+
+    return $result;
 }
 
 sub _get_handler {
@@ -815,6 +904,29 @@ B<return type determines scope>:
 Services are accessed directly on the context object: C<< $c->db >>,
 C<< $c->user >>, etc.
 
+=head2 Service Gotchas
+
+=over 4
+
+=item * B<Lazy initialization> - App-scoped service factories run on first
+access, not during startup. Use C<on_startup> for eager initialization.
+
+=item * B<Per-process isolation> - In multi-worker server mode (pre-fork),
+each worker maintains its own service instances. App-scoped services are
+NOT shared across workers.
+
+=item * B<Request-scoped access> - Request-scoped services can only be
+accessed via C<< $c->service_name >>, not C<< $app->service_name >>.
+
+=item * B<Thread safety> - App-scoped services must be thread-safe if your
+handler code uses threads. PAGI itself is single-threaded (event loop).
+
+=item * B<Arguments> - Request-scoped service factories receive
+C<< ($c, @args) >> where C<@args> are passed at call time:
+C<< $c->service_name(@args) >>.
+
+=back
+
 =head1 CONFIGURATION METHODS
 
 Override these in your subclass:
@@ -844,6 +956,14 @@ Enable Swagger UI at C</docs>. Default: true.
     sub enable_validation { 1 }
 
 Enable request validation. Default: true.
+
+=head2 max_request_body_size
+
+    sub max_request_body_size { 10 * 1024 * 1024 }  # 10MB
+
+Maximum request body size in bytes. Requests exceeding this limit receive
+a 413 (Request Entity Too Large) response. Set to 0 for unlimited.
+Default: 10MB.
 
 =head2 operation_separator
 
@@ -1056,6 +1176,75 @@ Use OpenAPI's C<$ref> to split your schema across files:
       schemas:
         Todo:
           $ref: 'components/todo.yaml#/Todo'
+
+=head1 INTERNALS
+
+These methods are not part of the public API and may change without notice.
+They are documented here for developers extending PAGI::OpenAPI.
+
+=head2 _load_schema
+
+    my $schema = $self->_load_schema($file);
+
+Loads and parses an OpenAPI schema file (YAML or JSON). Validates against
+path traversal attacks and ensures the file is within the app's home directory.
+
+=head2 _wire_operations
+
+    $self->_wire_operations($router, $schema);
+
+Walks the OpenAPI schema's C<paths> and registers routes for each operation.
+Maps C<operationId> to handler classes and methods.
+
+=head2 _build_handler
+
+    my $handler = $self->_build_handler(%args);
+
+Creates a wrapped handler that:
+1. Creates a Context object
+2. Validates the request (if enabled)
+3. Invokes the handler method
+4. Handles errors and cleanup
+
+=head2 _create_context
+
+    my $c = $self->_create_context($req, $res, $path_template, $http_method);
+
+Creates a L<PAGI::OpenAPI::Context> object for the current request.
+
+=head2 _validate_request
+
+    my $error = await $self->_validate_request($c, $path_template, $http_method);
+
+Validates the request against the OpenAPI schema. Returns an error response
+if validation fails, or C<undef> on success.
+
+=head2 _invoke_handler
+
+    my $result = await $self->_invoke_handler($c, $handler_name, $method_name);
+
+Loads the handler instance, verifies the method exists, calls it with the
+context, and handles any errors.
+
+=head2 _get_handler
+
+    my $handler = $self->_get_handler($name);
+
+Returns a cached handler instance, loading the handler class if needed.
+
+=head2 _get_service
+
+    my $instance = $self->_get_service($name);
+
+Resolves an app-scoped service by name. Returns C<undef> for request-scoped
+services (which must be accessed via the context).
+
+=head2 _is_dev_mode
+
+    my $bool = $self->_is_dev_mode;
+
+Returns true if C<PAGI_ENV> is set to 'development'. Defaults to false
+(production mode) for security.
 
 =head1 SEE ALSO
 

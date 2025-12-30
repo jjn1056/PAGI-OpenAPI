@@ -9,6 +9,12 @@ use Scalar::Util qw(blessed);
 sub new {
     my ($class, %args) = @_;
 
+    # Validate required parameters
+    for my $required (qw(app scope receive send)) {
+        croak "Missing required parameter: $required"
+            unless defined $args{$required};
+    }
+
     my $self = bless {
         app            => $args{app},
         scope          => $args{scope},
@@ -25,9 +31,9 @@ sub new {
     return $self;
 }
 
-# Check if we're in development mode
+# Check if we're in development mode (defaults to production for security)
 sub _is_dev_mode {
-    return ($ENV{PAGI_ENV} // '') eq 'development';
+    return ($ENV{PAGI_ENV} // 'production') eq 'development';
 }
 
 # Lazy request object
@@ -308,6 +314,12 @@ sub AUTOLOAD {
     my ($method) = $AUTOLOAD =~ /::(\w+)$/;
 
     return if $method eq 'DESTROY';
+
+    # Security: reject service names starting with underscore
+    # These could expose internal methods or private state
+    if ($method =~ /^_/) {
+        croak "Invalid service name: '$method' (names cannot start with underscore)";
+    }
 
     # Check services
     if (exists $self->{services}{$method}) {
